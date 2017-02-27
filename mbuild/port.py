@@ -1,7 +1,8 @@
 import numpy as np
 
 from mbuild.compound import Compound, Particle
-from mbuild.coordinate_transform import rotate, translate_to
+from mbuild.coordinate_transform import (rotate, translate_to, translate,
+                                         unit_vector, angle)
 from mbuild import clone
 
 
@@ -28,7 +29,7 @@ class Port(Compound):
         transform.
 
     """
-    def __init__(self, anchor=None):
+    def __init__(self, anchor=None, orientation=[0, 1, 0], separation=0):
         super(Port, self).__init__(name='Port', port_particle=True)
         self.anchor = anchor
 
@@ -45,8 +46,21 @@ class Port(Compound):
         self.add(down, 'down')
         self.used = False
 
+        default_direction = [0, 1, 0]
+        if np.array_equal(
+                np.asarray(default_direction), unit_vector(-np.asarray(orientation))):
+            rotate(self, np.pi, [1, 0, 0])
+        elif np.array_equal(
+                np.asarray(default_direction), unit_vector(np.asarray(orientation))):
+            pass
+        else:
+            normal = np.cross(default_direction, orientation)
+            rotate(self, -angle(default_direction, orientation), normal)
+
         if anchor:
             translate_to(self, anchor.pos)
+
+        translate(self, separation*unit_vector(orientation))
 
     def _clone(self, clone_of=None, root_container=None):
         newone = super(Port, self)._clone(clone_of, root_container)
@@ -58,3 +72,9 @@ class Port(Compound):
     def center(self):
         """The cartesian center of the Port"""
         return np.mean(self.xyz_with_ports, axis=0)
+
+    @property
+    def direction(self):
+        """The unit vector pointing in the 'direction' of the Port
+        """
+        return unit_vector(self.xyz_with_ports[1]-self.xyz_with_ports[0])
