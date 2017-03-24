@@ -10,5 +10,4 @@ class Chol(mb.Compound):
         xx = list(self.particles())
         mb.coordinate_transform.z_axis_transform(self,
                 new_origin=xx[0], point_on_z_axis=xx[6])
-        self.spin(np.pi, [1, 0, 0])
-
+        self.rotate(np.pi, [1, 0, 0])
