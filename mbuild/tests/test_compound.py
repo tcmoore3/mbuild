@@ -9,7 +9,6 @@ from mbuild.exceptions import MBuildError
 from mbuild.utils.io import get_fn, has_intermol, has_openbabel
 from mbuild.tests.base_test import BaseTest
 
-
 class TestCompound(BaseTest):
 
     def test_load_and_create(self):
@@ -25,8 +24,24 @@ class TestCompound(BaseTest):
             ch3.save(filename=outfile)
             assert os.path.exists(outfile)
 
+    def test_save_box(self, ch3):
+        extensions = ['.mol2', '.pdb', '.hoomdxml', '.gro']
+        box_attributes = ['mins', 'maxs', 'lengths']
+        custom_box = mb.Box([.8, .8, .8])
+        for ext in extensions:
+            outfile_padded = 'padded_methyl' + ext
+            outfile_custom = 'custom_methyl' + ext
+            ch3.save(filename=outfile_padded, box=None, overwrite=True)
+            ch3.save(filename=outfile_custom, box=custom_box, overwrite=True)
+            padded_ch3 = mb.load(outfile_padded)
+            custom_ch3 = mb.load(outfile_custom)
+            for attr in box_attributes:
+                pad_attr = getattr(padded_ch3.boundingbox, attr)
+                custom_attr = getattr(custom_ch3.boundingbox, attr)
+                assert np.array_equal(pad_attr, custom_attr)
+
     def test_save_overwrite(self, ch3):
-        extensions = ['.gsd', '.hoomdxml', '.lammps', '.lmp']
+        extensions = ['.gsd', '.hoomdxml', '.lammps', '.lmp', '.top', '.gro']
         for ext in extensions:
             outfile = 'lyhtem' + ext
             ch3.save(filename=outfile)
@@ -53,10 +68,14 @@ class TestCompound(BaseTest):
     def test_save_resnames_single(self, c3, n4):
         system = mb.Compound([c3, n4])
         system.save('resnames_single.gro', residues=['C3', 'N4'])
-
         struct = pmd.load_file('resnames_single.gro')
         assert struct.residues[0].number ==  1
         assert struct.residues[1].number ==  2
+
+    def test_save_references(self, methane):
+        methane.save('methyl.mol2', forcefield_name='oplsaa',
+                     references_file='methane.bib')
+        assert os.path.isfile('methane.bib')
 
     def test_batch_add(self, ethane, h2o):
         compound = mb.Compound()
@@ -492,7 +511,7 @@ class TestCompound(BaseTest):
     def test_update_coords_update_ports(self, ch2):
         distances = np.round([ch2.min_periodic_distance(port.pos, ch2[0].pos)
                               for port in ch2.referenced_ports()], 5)
-        orientations = np.round([port.pos - port.anchor.pos 
+        orientations = np.round([port.pos - port.anchor.pos
                                  for port in ch2.referenced_ports()], 5)
 
         ch2_clone = mb.clone(ch2)
@@ -502,11 +521,42 @@ class TestCompound(BaseTest):
         ch2.update_coordinates('ch2-shift.pdb')
         updated_distances = np.round([ch2.min_periodic_distance(port.pos, ch2[0].pos)
                                       for port in ch2.referenced_ports()], 5)
-        updated_orientations = np.round([port.pos - port.anchor.pos 
+        updated_orientations = np.round([port.pos - port.anchor.pos
                                          for port in ch2.referenced_ports()], 5)
 
         assert np.array_equal(distances, updated_distances)
         assert np.array_equal(orientations, updated_orientations)
+
+    def test_charge(self, ch2, ch3):
+        compound = mb.Compound(charge=2.0)
+        assert compound.charge == 2.0
+        compound2 = mb.Compound()
+        assert compound2.charge == 0.0
+
+        ch2[0].charge = 0.5
+        ch2[1].charge = -0.25
+        ch3[0].charge = 1.0
+        compound.add([ch2, ch3])
+        assert compound.charge == 1.25
+        assert ch2.charge == 0.25
+        assert compound[0].charge == 0.5
+
+        with pytest.raises(AttributeError):
+            compound.charge = 2.0
+
+    def test_charge_subcompounds(self, ch2, ch3):
+        ch2[0].charge = 0.5
+        ch2[1].charge = -0.25
+        compound = mb.Compound(subcompounds=ch2)
+        assert compound.charge == 0.25
+
+        with pytest.raises(MBuildError):
+            compound = mb.Compound(subcompounds=ch3, charge=1.0)
+
+    def test_charge_neutrality_warn(self, benzene):
+        benzene[0].charge = 0.25
+        with pytest.warns(UserWarning):
+            benzene.save('charge-test.mol2')
 
     @pytest.mark.skipif(not has_openbabel, reason="Open Babel package not installed")
     def test_energy_minimization(self, octane):
@@ -542,15 +592,15 @@ class TestCompound(BaseTest):
     def test_energy_minimization_ports(self, octane):
         distances = np.round([octane.min_periodic_distance(port.pos, port.anchor.pos)
                               for port in octane.all_ports()], 5)
-        orientations = np.round([port.pos - port.anchor.pos 
+        orientations = np.round([port.pos - port.anchor.pos
                                  for port in octane.all_ports()], 5)
 
         octane.energy_minimization()
 
-        updated_distances = np.round([octane.min_periodic_distance(port.pos, 
+        updated_distances = np.round([octane.min_periodic_distance(port.pos,
                                                                    port.anchor.pos)
                                       for port in octane.all_ports()], 5)
-        updated_orientations = np.round([port.pos - port.anchor.pos 
+        updated_orientations = np.round([port.pos - port.anchor.pos
                                          for port in octane.all_ports()], 5)
 
         assert np.array_equal(distances, updated_distances)
@@ -562,3 +612,11 @@ class TestCompound(BaseTest):
         mb.force_overlap(ch3, ch3['up'], ch2['up'])
         with pytest.raises(MBuildError):
             ch3_clone = mb.clone(ch3)
+
+    def test_load_mol2_mdtraj(self):
+        with pytest.raises(KeyError):
+            mb.load(get_fn('benzene-nonelement.mol2'))
+        mb.load(get_fn('benzene-nonelement.mol2'), use_parmed=True)
+
+    def test_siliane_bond_number(self, silane):
+        assert silane.n_bonds == 4
